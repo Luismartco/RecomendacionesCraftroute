@@ -5,6 +5,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 import json
 from config import get_engine
 
+# =========================
+# CARGA DE DATOS
+# =========================
 def cargar_productos():
     engine = get_engine()
     query = """
@@ -13,19 +16,26 @@ def cargar_productos():
     """
     df = pd.read_sql_query(query, engine)
 
-    print("Columnas encontradas:", df.columns.tolist())
-
-    # columnas que quieres usar
-    cols = ['categoria', 'municipio_venta', 'tecnica_artesanal', 'materia_prima', 'color']
+    # columnas que usamos para construir features
+    cols = ['descripcion', 'categoria', 'municipio_venta', 'tecnica_artesanal', 'materia_prima', 'color']
     cols_existentes = [c for c in cols if c in df.columns]
 
     if not cols_existentes:
-        print("⚠️ No se encontraron columnas de características para generar features.")
         df['features'] = ""
     else:
-        df['features'] = df[cols_existentes].astype(str).agg(' '.join, axis=1)
+        df['features'] = df[cols_existentes].fillna("").astype(str).agg(' '.join, axis=1)
 
     return df
+
+
+def cargar_tiendas():
+    engine = get_engine()
+    query = """
+    SELECT id, user_id, nombre, barrio, municipio_venta, latitude, longitude
+    FROM tiendas;
+    """
+    return pd.read_sql_query(query, engine)
+
 
 def obtener_preferencias_usuario(user_id):
     engine = get_engine()
@@ -40,26 +50,23 @@ def obtener_preferencias_usuario(user_id):
     except:
         return []
 
-def recomendar_productos(user_id, limit=None):
-    df = cargar_productos()
-    print("\n=== Productos cargados ===")
-    print(df[['id', 'nombre']].head())
 
+# =========================
+# RECOMENDACIONES
+# =========================
+def recomendar_productos(user_id, limit=30):
+    df = cargar_productos()
     productos_input = obtener_preferencias_usuario(user_id)
-    print(f"Preferencias usuario {user_id}:", productos_input)
 
     if len(productos_input) == 0:
-        print("No hay preferencias.")
         return []
 
     vectorizer = TfidfVectorizer()
     tfidf_matrix = vectorizer.fit_transform(df['features'])
 
     ids_validos = [pid for pid in productos_input if pid in df['id'].values]
-    print("IDs válidos encontrados en productos:", ids_validos)
 
     if len(ids_validos) < 1:
-        print("Ningún ID de preferencia coincide con productos.id")
         return []
 
     idxs = [df[df['id'] == pid].index[0] for pid in ids_validos]
@@ -70,9 +77,41 @@ def recomendar_productos(user_id, limit=None):
     df['similitud'] = similitudes
     recomendados = df[~df['id'].isin(ids_validos)].sort_values(by='similitud', ascending=False)
 
-    print("Productos recomendados encontrados:", len(recomendados))
-
-    if limit:
-        recomendados = recomendados.head(limit)
+    recomendados = recomendados.head(limit)
 
     return recomendados[['id', 'nombre', 'categoria', 'precio', 'municipio_venta', 'similitud']].to_dict(orient="records")
+
+
+def recomendar_tiendas(user_id, limit=15):
+    df_productos = cargar_productos()
+    df_tiendas = cargar_tiendas()
+    productos_input = obtener_preferencias_usuario(user_id)
+
+    if len(productos_input) == 0:
+        return []
+
+    # Paso 1: obtener recomendaciones de productos (para ampliar cobertura)
+    productos_recomendados = recomendar_productos(user_id, limit=50)
+    ids_recomendados = [p['id'] for p in productos_recomendados]
+
+    # Paso 2: productos favoritos + recomendados
+    df_seleccionados = df_productos[df_productos['id'].isin(productos_input + ids_recomendados)]
+
+    # Paso 3: user_id de las tiendas que venden esos productos
+    user_ids_tiendas = df_seleccionados['user_id'].unique()
+
+    # Paso 4: filtrar tiendas
+    tiendas_relacionadas = df_tiendas[df_tiendas['user_id'].isin(user_ids_tiendas)]
+
+    # Paso 5: si hay menos de "limit", rellenar con tiendas aleatorias para completar
+    if len(tiendas_relacionadas) < limit:
+        restantes = limit - len(tiendas_relacionadas)
+        otras = df_tiendas[~df_tiendas['user_id'].isin(user_ids_tiendas)]
+        if len(otras) > 0:
+            otras_sample = otras.sample(min(restantes, len(otras)), random_state=42)
+            tiendas_relacionadas = pd.concat([tiendas_relacionadas, otras_sample])
+
+    # Paso 6: limitar a "limit" final
+    tiendas_relacionadas = tiendas_relacionadas.head(limit)
+
+    return tiendas_relacionadas[['id', 'nombre', 'barrio', 'municipio_venta', 'latitude', 'longitude']].to_dict(orient="records")
