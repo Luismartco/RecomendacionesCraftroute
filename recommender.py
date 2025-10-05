@@ -11,7 +11,7 @@ from config import get_engine
 def cargar_productos():
     engine = get_engine()
     query = """
-    SELECT id, user_id, nombre, descripcion, precio, categoria, municipio_venta, tecnica_artesanal, materia_prima, color
+    SELECT id, user_id, nombre, descripcion, precio, categoria_id, municipio_venta, tecnica_id, material_id, color
     FROM productos;
     """
     df = pd.read_sql_query(query, engine)
@@ -79,7 +79,7 @@ def recomendar_productos(user_id, limit=30):
 
     recomendados = recomendados.head(limit)
 
-    return recomendados[['id', 'nombre', 'categoria', 'precio', 'municipio_venta', 'similitud']].to_dict(orient="records")
+    return recomendados[['id']].to_dict(orient="records")
 
 
 def recomendar_tiendas(user_id, limit=15):
@@ -114,4 +114,4 @@ def recomendar_tiendas(user_id, limit=15):
     # Paso 6: limitar a "limit" final
     tiendas_relacionadas = tiendas_relacionadas.head(limit)
 
-    return tiendas_relacionadas[['id', 'nombre', 'barrio', 'municipio_venta', 'latitude', 'longitude']].to_dict(orient="records")
+    return tiendas_relacionadas[['id']].to_dict(orient="records")
