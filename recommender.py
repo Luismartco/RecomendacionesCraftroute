@@ -90,28 +90,37 @@ def recomendar_tiendas(user_id, limit=15):
     if len(productos_input) == 0:
         return []
 
-    # Paso 1: obtener recomendaciones de productos (para ampliar cobertura)
-    productos_recomendados = recomendar_productos(user_id, limit=50)
-    ids_recomendados = [p['id'] for p in productos_recomendados]
+    # Obtener user_ids de los productos seleccionados
+    df_seleccionados = df_productos[df_productos['id'].isin(productos_input)]
+    if df_seleccionados.empty:
+        return []
 
-    # Paso 2: productos favoritos + recomendados
-    df_seleccionados = df_productos[df_productos['id'].isin(productos_input + ids_recomendados)]
+    user_ids_tiendas_base = df_seleccionados['user_id'].unique()
 
-    # Paso 3: user_id de las tiendas que venden esos productos
-    user_ids_tiendas = df_seleccionados['user_id'].unique()
+    # Tiendas base (donde se crearon esos productos)
+    tiendas_base = df_tiendas[df_tiendas['user_id'].isin(user_ids_tiendas_base)]
+    if tiendas_base.empty:
+        return []
 
-    # Paso 4: filtrar tiendas
-    tiendas_relacionadas = df_tiendas[df_tiendas['user_id'].isin(user_ids_tiendas)]
+    # Construir features de tiendas (puedes ajustar columnas)
+    cols_tiendas = ['nombre', 'barrio', 'municipio_venta']
+    df_tiendas['features'] = df_tiendas[cols_tiendas].fillna("").astype(str).agg(' '.join, axis=1)
+    tiendas_base['features'] = tiendas_base[cols_tiendas].fillna("").astype(str).agg(' '.join, axis=1)
 
-    # Paso 5: si hay menos de "limit", rellenar con tiendas aleatorias para completar
-    if len(tiendas_relacionadas) < limit:
-        restantes = limit - len(tiendas_relacionadas)
-        otras = df_tiendas[~df_tiendas['user_id'].isin(user_ids_tiendas)]
-        if len(otras) > 0:
-            otras_sample = otras.sample(min(restantes, len(otras)), random_state=42)
-            tiendas_relacionadas = pd.concat([tiendas_relacionadas, otras_sample])
+    # Vectorizar y calcular similitudes
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform(df_tiendas['features'])
 
-    # Paso 6: limitar a "limit" final
-    tiendas_relacionadas = tiendas_relacionadas.head(limit)
+    idxs_base = df_tiendas[df_tiendas['id'].isin(tiendas_base['id'])].index
+    selected_vectors = tfidf_matrix[idxs_base]
 
-    return tiendas_relacionadas[['id']].to_dict(orient="records")
+    mean_vector = np.asarray(selected_vectors.mean(axis=0))
+    similitudes = cosine_similarity(mean_vector, tfidf_matrix).flatten()
+
+    df_tiendas['similitud'] = similitudes
+
+    # Filtrar y ordenar
+    recomendadas = df_tiendas[~df_tiendas['id'].isin(tiendas_base['id'])]
+    recomendadas = recomendadas.sort_values(by='similitud', ascending=False).head(limit)
+
+    return recomendadas[['id']].to_dict(orient="records")
