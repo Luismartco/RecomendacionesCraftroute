@@ -16,14 +16,12 @@ def cargar_productos():
     """
     df = pd.read_sql_query(query, engine)
 
-    # columnas que usamos para construir features
-    cols = ['descripcion', 'categoria', 'municipio_venta', 'tecnica_artesanal', 'materia_prima', 'color']
+    # Campos que usaremos para construir las features
+    cols = ['nombre', 'descripcion', 'categoria_id', 'material_id', 'tecnica_id', 'municipio_venta', 'color']
     cols_existentes = [c for c in cols if c in df.columns]
 
-    if not cols_existentes:
-        df['features'] = ""
-    else:
-        df['features'] = df[cols_existentes].fillna("").astype(str).agg(' '.join, axis=1)
+    # Combinar todo en una sola cadena de texto
+    df['features'] = df[cols_existentes].fillna("").astype(str).agg(' '.join, axis=1)
 
     return df
 
