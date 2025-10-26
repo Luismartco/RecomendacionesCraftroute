@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="https://github.com/Luismartco/Craftroutev2/blob/main/resources/media/logo/logo.jpg" alt="Craftroute" width="150"/>
+</div>
+
 # Sistema de Recomendaciones Craftroute
 
 Este proyecto implementa un sistema de recomendaciones para [Craftroute](https://github.com/Luismartco/Craftroutev2), una plataforma de comercio de artesanías. El sistema proporciona recomendaciones personalizadas de productos y tiendas para los usuarios basándose en técnicas de procesamiento de lenguaje natural y similitud de coseno.
