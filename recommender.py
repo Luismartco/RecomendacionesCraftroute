@@ -96,20 +96,29 @@ def recomendar_productos(user_id, limit=30, k=10):
     idxs = [df[df['id'] == pid].index[0] for pid in ids_validos]
     selected_vectors = tfidf_matrix[idxs]
 
-    # Modelo KNN (basado en similitud del coseno)
+    # Modelo KNN (cosine similarity)
     knn = NearestNeighbors(metric='cosine', algorithm='brute', n_neighbors=min(k, len(df)))
     knn.fit(tfidf_matrix)
 
-    # Buscar vecinos más cercanos
+    # Vecinos más cercanos
     distances, indices = knn.kneighbors(selected_vectors, n_neighbors=limit)
 
-    # Aplanar los resultados y eliminar duplicados
+    # Aplanar y limpiar duplicados
     indices_flat = np.unique(indices.flatten())
 
-    # Crear DataFrame de recomendados con similitud promedio
+    # Calcular similitud promedio (invirtiendo distancia)
+    mean_distances = []
+    for idx in indices_flat:
+        # Tomar todas las distancias donde aparece ese índice
+        dists = distances[:, np.where(indices == idx)[1]]
+        if len(dists.flatten()) > 0:
+            mean_distances.append(1 - np.mean(dists))
+        else:
+            mean_distances.append(0)
+
+    # Crear dataframe de recomendados con similitudes alineadas
     recomendados = df.iloc[indices_flat].copy()
-    similitudes = 1 - distances.mean(axis=0)  # Cosine distance → similarity
-    recomendados['similitud'] = similitudes[:len(recomendados)]
+    recomendados['similitud'] = mean_distances
 
     # Excluir productos ya vistos
     recomendados = recomendados[~recomendados['id'].isin(ids_validos)]
@@ -160,9 +169,17 @@ def recomendar_tiendas(user_id, limit=15, k=10):
     distances, indices = knn.kneighbors(selected_vectors, n_neighbors=limit)
     indices_flat = np.unique(indices.flatten())
 
+    # Calcular similitud promedio
+    mean_distances = []
+    for idx in indices_flat:
+        dists = distances[:, np.where(indices == idx)[1]]
+        if len(dists.flatten()) > 0:
+            mean_distances.append(1 - np.mean(dists))
+        else:
+            mean_distances.append(0)
+
     recomendadas = df_tiendas.iloc[indices_flat].copy()
-    similitudes = 1 - distances.mean(axis=0)
-    recomendadas['similitud'] = similitudes[:len(recomendadas)]
+    recomendadas['similitud'] = mean_distances
 
     recomendadas = recomendadas[~recomendadas['id'].isin(tiendas_base['id'])]
     recomendadas = recomendadas.sort_values(by='similitud', ascending=False).head(limit)
