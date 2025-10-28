@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.neighbors import NearestNeighbors
 import json
 from config import get_engine
 
@@ -23,7 +24,6 @@ def cargar_productos():
 
     # Combinar todo en una sola cadena de texto
     df['features'] = df[cols_existentes].fillna("").astype(str).agg(' '.join, axis=1)
-
     return df
 
 
@@ -55,112 +55,116 @@ def obtener_preferencias_usuario(user_id):
 
 def obtener_historial_cliente(user_id):
     engine = get_engine()
-
     query = f"""
     SELECT dt.id_producto, dt.id_tienda
     FROM transacciones t
     JOIN detalles_transaccion dt ON t.id_transaccion = dt.id_transaccion
     WHERE t.id_cliente = {user_id};
     """
-
     df_historial = pd.read_sql_query(query, engine)
 
     productos = df_historial['id_producto'].dropna().unique().tolist()
     tiendas = df_historial['id_tienda'].dropna().unique().tolist()
 
-    return {
-        "productos": productos,
-        "tiendas": tiendas
-    }
+    return {"productos": productos, "tiendas": tiendas}
 
 
 # =========================
-# RECOMENDADOR DE PRODUCTOS
+# RECOMENDADOR DE PRODUCTOS (TF-IDF + Cosine + KNN)
 # =========================
-def recomendar_productos(user_id, limit=30):
+def recomendar_productos(user_id, limit=30, k=10):
     df = cargar_productos()
 
-    # Obtener preferencias explícitas del usuario
+    # Preferencias o historial
     productos_input = obtener_preferencias_usuario(user_id)
-
-    # Si no hay preferencias, usar historial de transacciones
     if len(productos_input) == 0:
         historial = obtener_historial_cliente(user_id)
         productos_input = historial["productos"]
-
     if len(productos_input) == 0:
         return []
 
-    # Vectorizar y calcular similitudes
+    # Vectorización TF-IDF
     vectorizer = TfidfVectorizer()
     tfidf_matrix = vectorizer.fit_transform(df['features'])
 
+    # Filtrar productos válidos
     ids_validos = [pid for pid in productos_input if pid in df['id'].values]
     if len(ids_validos) < 1:
         return []
 
+    # Índices de los productos de referencia
     idxs = [df[df['id'] == pid].index[0] for pid in ids_validos]
     selected_vectors = tfidf_matrix[idxs]
-    mean_vector = np.asarray(selected_vectors.mean(axis=0))
 
-    similitudes = cosine_similarity(mean_vector, tfidf_matrix).flatten()
-    df['similitud'] = similitudes
+    # Modelo KNN (basado en similitud del coseno)
+    knn = NearestNeighbors(metric='cosine', algorithm='brute', n_neighbors=min(k, len(df)))
+    knn.fit(tfidf_matrix)
 
-    recomendados = df[~df['id'].isin(ids_validos)].sort_values(by='similitud', ascending=False)
-    recomendados = recomendados.head(limit)
+    # Buscar vecinos más cercanos
+    distances, indices = knn.kneighbors(selected_vectors, n_neighbors=limit)
+
+    # Aplanar los resultados y eliminar duplicados
+    indices_flat = np.unique(indices.flatten())
+
+    # Crear DataFrame de recomendados con similitud promedio
+    recomendados = df.iloc[indices_flat].copy()
+    similitudes = 1 - distances.mean(axis=0)  # Cosine distance → similarity
+    recomendados['similitud'] = similitudes[:len(recomendados)]
+
+    # Excluir productos ya vistos
+    recomendados = recomendados[~recomendados['id'].isin(ids_validos)]
+    recomendados = recomendados.sort_values(by='similitud', ascending=False).head(limit)
 
     return recomendados[['id']].to_dict(orient="records")
 
 
 # =========================
-# RECOMENDADOR DE TIENDAS
+# RECOMENDADOR DE TIENDAS (TF-IDF + Cosine + KNN)
 # =========================
-def recomendar_tiendas(user_id, limit=15):
+def recomendar_tiendas(user_id, limit=15, k=10):
     df_productos = cargar_productos()
     df_tiendas = cargar_tiendas()
 
-    # Obtener preferencias explícitas
+    # Preferencias o historial
     productos_input = obtener_preferencias_usuario(user_id)
-
-    # Si no hay preferencias, usar historial del cliente
     if len(productos_input) == 0:
         historial = obtener_historial_cliente(user_id)
         productos_input = historial["productos"]
-
     if len(productos_input) == 0:
         return []
 
-    # Obtener productos seleccionados
     df_seleccionados = df_productos[df_productos['id'].isin(productos_input)]
     if df_seleccionados.empty:
         return []
 
     user_ids_tiendas_base = df_seleccionados['user_id'].unique()
-
-    # Tiendas base donde se crearon esos productos
     tiendas_base = df_tiendas[df_tiendas['user_id'].isin(user_ids_tiendas_base)]
     if tiendas_base.empty:
         return []
 
-    # Construir features de tiendas
+    # Features de tiendas
     cols_tiendas = ['nombre', 'barrio', 'municipio_venta']
     df_tiendas['features'] = df_tiendas[cols_tiendas].fillna("").astype(str).agg(' '.join, axis=1)
-    tiendas_base['features'] = tiendas_base[cols_tiendas].fillna("").astype(str).agg(' '.join, axis=1)
 
-    # Vectorizar y calcular similitudes
     vectorizer = TfidfVectorizer()
     tfidf_matrix = vectorizer.fit_transform(df_tiendas['features'])
 
+    # Índices base
     idxs_base = df_tiendas[df_tiendas['id'].isin(tiendas_base['id'])].index
     selected_vectors = tfidf_matrix[idxs_base]
 
-    mean_vector = np.asarray(selected_vectors.mean(axis=0))
-    similitudes = cosine_similarity(mean_vector, tfidf_matrix).flatten()
+    # Modelo KNN
+    knn = NearestNeighbors(metric='cosine', algorithm='brute', n_neighbors=min(k, len(df_tiendas)))
+    knn.fit(tfidf_matrix)
 
-    df_tiendas['similitud'] = similitudes
+    distances, indices = knn.kneighbors(selected_vectors, n_neighbors=limit)
+    indices_flat = np.unique(indices.flatten())
 
-    # Filtrar y ordenar
-    recomendadas = df_tiendas[~df_tiendas['id'].isin(tiendas_base['id'])]
+    recomendadas = df_tiendas.iloc[indices_flat].copy()
+    similitudes = 1 - distances.mean(axis=0)
+    recomendadas['similitud'] = similitudes[:len(recomendadas)]
+
+    recomendadas = recomendadas[~recomendadas['id'].isin(tiendas_base['id'])]
     recomendadas = recomendadas.sort_values(by='similitud', ascending=False).head(limit)
 
     return recomendadas[['id']].to_dict(orient="records")
