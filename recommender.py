@@ -5,6 +5,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import json
 from config import get_engine
 
+
 # =========================
 # CARGA DE DATOS
 # =========================
@@ -16,7 +17,7 @@ def cargar_productos():
     """
     df = pd.read_sql_query(query, engine)
 
-    # Campos que usaremos para construir las features
+    # Campos para construir las features
     cols = ['nombre', 'descripcion', 'categoria_id', 'material_id', 'tecnica_id', 'municipio_venta', 'color']
     cols_existentes = [c for c in cols if c in df.columns]
 
@@ -35,6 +36,9 @@ def cargar_tiendas():
     return pd.read_sql_query(query, engine)
 
 
+# =========================
+# PREFERENCIAS / HISTORIAL
+# =========================
 def obtener_preferencias_usuario(user_id):
     engine = get_engine()
     query = f"SELECT selected_preferences FROM user_preferences WHERE user_id = {user_id}"
@@ -49,21 +53,49 @@ def obtener_preferencias_usuario(user_id):
         return []
 
 
+def obtener_historial_cliente(user_id):
+    engine = get_engine()
+
+    query = f"""
+    SELECT dt.id_producto, dt.id_tienda
+    FROM transacciones t
+    JOIN detalles_transaccion dt ON t.id_transaccion = dt.id_transaccion
+    WHERE t.id_cliente = {user_id};
+    """
+
+    df_historial = pd.read_sql_query(query, engine)
+
+    productos = df_historial['id_producto'].dropna().unique().tolist()
+    tiendas = df_historial['id_tienda'].dropna().unique().tolist()
+
+    return {
+        "productos": productos,
+        "tiendas": tiendas
+    }
+
+
 # =========================
-# RECOMENDACIONES
+# RECOMENDADOR DE PRODUCTOS
 # =========================
 def recomendar_productos(user_id, limit=30):
     df = cargar_productos()
+
+    # Obtener preferencias explícitas del usuario
     productos_input = obtener_preferencias_usuario(user_id)
+
+    # Si no hay preferencias, usar historial de transacciones
+    if len(productos_input) == 0:
+        historial = obtener_historial_cliente(user_id)
+        productos_input = historial["productos"]
 
     if len(productos_input) == 0:
         return []
 
+    # Vectorizar y calcular similitudes
     vectorizer = TfidfVectorizer()
     tfidf_matrix = vectorizer.fit_transform(df['features'])
 
     ids_validos = [pid for pid in productos_input if pid in df['id'].values]
-
     if len(ids_validos) < 1:
         return []
 
@@ -73,34 +105,44 @@ def recomendar_productos(user_id, limit=30):
 
     similitudes = cosine_similarity(mean_vector, tfidf_matrix).flatten()
     df['similitud'] = similitudes
-    recomendados = df[~df['id'].isin(ids_validos)].sort_values(by='similitud', ascending=False)
 
+    recomendados = df[~df['id'].isin(ids_validos)].sort_values(by='similitud', ascending=False)
     recomendados = recomendados.head(limit)
 
     return recomendados[['id']].to_dict(orient="records")
 
 
+# =========================
+# RECOMENDADOR DE TIENDAS
+# =========================
 def recomendar_tiendas(user_id, limit=15):
     df_productos = cargar_productos()
     df_tiendas = cargar_tiendas()
+
+    # Obtener preferencias explícitas
     productos_input = obtener_preferencias_usuario(user_id)
+
+    # Si no hay preferencias, usar historial del cliente
+    if len(productos_input) == 0:
+        historial = obtener_historial_cliente(user_id)
+        productos_input = historial["productos"]
 
     if len(productos_input) == 0:
         return []
 
-    # Obtener user_ids de los productos seleccionados
+    # Obtener productos seleccionados
     df_seleccionados = df_productos[df_productos['id'].isin(productos_input)]
     if df_seleccionados.empty:
         return []
 
     user_ids_tiendas_base = df_seleccionados['user_id'].unique()
 
-    # Tiendas base (donde se crearon esos productos)
+    # Tiendas base donde se crearon esos productos
     tiendas_base = df_tiendas[df_tiendas['user_id'].isin(user_ids_tiendas_base)]
     if tiendas_base.empty:
         return []
 
-    # Construir features de tiendas (puedes ajustar columnas)
+    # Construir features de tiendas
     cols_tiendas = ['nombre', 'barrio', 'municipio_venta']
     df_tiendas['features'] = df_tiendas[cols_tiendas].fillna("").astype(str).agg(' '.join, axis=1)
     tiendas_base['features'] = tiendas_base[cols_tiendas].fillna("").astype(str).agg(' '.join, axis=1)
