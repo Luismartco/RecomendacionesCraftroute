@@ -18,8 +18,8 @@ def cargar_productos():
     """
     df = pd.read_sql_query(query, engine)
 
-    # Campos para construir las features
-    cols = ['nombre', 'descripcion', 'categoria_id', 'material_id', 'tecnica_id', 'municipio_venta', 'color']
+    # columnas que usamos para construir features
+    cols = ['descripcion', 'categoria', 'municipio_venta', 'tecnica_artesanal', 'materia_prima', 'color']
     cols_existentes = [c for c in cols if c in df.columns]
 
     # Combinar todo en una sola cadena de texto
@@ -124,7 +124,8 @@ def recomendar_productos(user_id, limit=30, k=10):
     recomendados = recomendados[~recomendados['id'].isin(ids_validos)]
     recomendados = recomendados.sort_values(by='similitud', ascending=False).head(limit)
 
-    return recomendados[['id']].to_dict(orient="records")
+    # Retornar todo el contenido del producto + similitud
+    return recomendados.to_dict(orient="records")
 
 
 # =========================
@@ -142,16 +143,19 @@ def recomendar_tiendas(user_id, limit=15, k=10):
     if len(productos_input) == 0:
         return []
 
+    # Obtener user_ids de los productos seleccionados
     df_seleccionados = df_productos[df_productos['id'].isin(productos_input)]
     if df_seleccionados.empty:
         return []
 
     user_ids_tiendas_base = df_seleccionados['user_id'].unique()
+
+    # Tiendas base (donde se crearon esos productos)
     tiendas_base = df_tiendas[df_tiendas['user_id'].isin(user_ids_tiendas_base)]
     if tiendas_base.empty:
         return []
 
-    # Features de tiendas
+    # Construir features de tiendas (puedes ajustar columnas)
     cols_tiendas = ['nombre', 'barrio', 'municipio_venta']
     df_tiendas['features'] = df_tiendas[cols_tiendas].fillna("").astype(str).agg(' '.join, axis=1)
 
@@ -181,7 +185,9 @@ def recomendar_tiendas(user_id, limit=15, k=10):
     recomendadas = df_tiendas.iloc[indices_flat].copy()
     recomendadas['similitud'] = mean_distances
 
-    recomendadas = recomendadas[~recomendadas['id'].isin(tiendas_base['id'])]
+    recomendadas = df_tiendas[~df_tiendas['id'].isin(tiendas_base['id'])]
     recomendadas = recomendadas.sort_values(by='similitud', ascending=False).head(limit)
 
-    return recomendadas[['id']].to_dict(orient="records")
+    # Retornar toda la info de la tienda + similitud
+    return recomendadas.to_dict(orient="records")
+
