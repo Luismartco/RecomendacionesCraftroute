@@ -1,5 +1,5 @@
 from flask import Flask, jsonify, request
-from recommender import recomendar_productos, recomendar_tiendas, obtener_preferencias_usuario, obtener_historial_cliente, cargar_productos
+from recommender import recomendar_productos, recomendar_tiendas, obtener_preferencias_usuario, obtener_historial_cliente, cargar_productos, cargar_tiendas
 
 app = Flask(__name__)
 
@@ -28,46 +28,29 @@ def ver_datos_usuario():
         return jsonify({"error": "Falta user_id"}), 400
 
     try:
-        # Cargar los datos base
         productos_df = cargar_productos()
+        tiendas_df = cargar_tiendas()
 
-        # Obtener preferencias y historial
         preferencias = obtener_preferencias_usuario(user_id)
         historial = obtener_historial_cliente(user_id)
 
-        # ====== Preferencias ======
-        if len(preferencias) > 0:
-            tiendas_pref = (
-                productos_df[productos_df["id"].isin(preferencias)]["user_id"]
-                .dropna()
-                .unique()
-                .tolist()
-            )
-        else:
-            tiendas_pref = []
+        # Productos y tiendas completas para preferencias
+        productos_pref_df = productos_df[productos_df["id"].isin(preferencias)]
+        tiendas_pref_df = tiendas_df[tiendas_df["user_id"].isin(productos_pref_df["user_id"].unique())]
 
-        # ====== Historial ======
-        productos_hist = historial.get("productos", [])
-        tiendas_hist = historial.get("tiendas", [])
-
-        # Si los productos del historial no tienen tiendas explícitas, se buscan
-        if len(tiendas_hist) == 0 and len(productos_hist) > 0:
-            tiendas_hist = (
-                productos_df[productos_df["id"].isin(productos_hist)]["user_id"]
-                .dropna()
-                .unique()
-                .tolist()
-            )
+        # Productos y tiendas completas para historial
+        productos_hist_df = productos_df[productos_df["id"].isin(historial.get("productos", []))]
+        tiendas_hist_df = tiendas_df[tiendas_df["id"].isin(historial.get("tiendas", []))]
 
         respuesta = {
             "user_id": user_id,
             "preferencias": {
-                "id_productos": preferencias,
-                "id_tiendas": tiendas_pref
+                "productos": productos_pref_df.to_dict(orient="records"),
+                "tiendas": tiendas_pref_df.to_dict(orient="records")
             },
             "historial": {
-                "id_productos": productos_hist,
-                "id_tiendas": tiendas_hist
+                "productos": productos_hist_df.to_dict(orient="records"),
+                "tiendas": tiendas_hist_df.to_dict(orient="records")
             }
         }
 

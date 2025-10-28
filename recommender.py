@@ -83,48 +83,36 @@ def recomendar_productos(user_id, limit=30, k=10):
     if len(productos_input) == 0:
         return []
 
-    # Vectorización TF-IDF
     vectorizer = TfidfVectorizer()
     tfidf_matrix = vectorizer.fit_transform(df['features'])
 
-    # Filtrar productos válidos
     ids_validos = [pid for pid in productos_input if pid in df['id'].values]
     if len(ids_validos) < 1:
         return []
 
-    # Índices de los productos de referencia
     idxs = [df[df['id'] == pid].index[0] for pid in ids_validos]
     selected_vectors = tfidf_matrix[idxs]
 
-    # Modelo KNN (cosine similarity)
     knn = NearestNeighbors(metric='cosine', algorithm='brute', n_neighbors=min(k, len(df)))
     knn.fit(tfidf_matrix)
 
-    # Vecinos más cercanos
     distances, indices = knn.kneighbors(selected_vectors, n_neighbors=limit)
-
-    # Aplanar y limpiar duplicados
     indices_flat = np.unique(indices.flatten())
 
-    # Calcular similitud promedio (invirtiendo distancia)
     mean_distances = []
     for idx in indices_flat:
-        # Tomar todas las distancias donde aparece ese índice
         dists = distances[:, np.where(indices == idx)[1]]
-        if len(dists.flatten()) > 0:
-            mean_distances.append(1 - np.mean(dists))
-        else:
-            mean_distances.append(0)
+        mean_distances.append(1 - np.mean(dists) if len(dists.flatten()) > 0 else 0)
 
-    # Crear dataframe de recomendados con similitudes alineadas
     recomendados = df.iloc[indices_flat].copy()
     recomendados['similitud'] = mean_distances
 
-    # Excluir productos ya vistos
     recomendados = recomendados[~recomendados['id'].isin(ids_validos)]
     recomendados = recomendados.sort_values(by='similitud', ascending=False).head(limit)
 
-    return recomendados[['id']].to_dict(orient="records")
+    # 🔹 Devolver toda la información del producto
+    return recomendados.to_dict(orient="records")
+
 
 
 # =========================
@@ -134,7 +122,6 @@ def recomendar_tiendas(user_id, limit=15, k=10):
     df_productos = cargar_productos()
     df_tiendas = cargar_tiendas()
 
-    # Preferencias o historial
     productos_input = obtener_preferencias_usuario(user_id)
     if len(productos_input) == 0:
         historial = obtener_historial_cliente(user_id)
@@ -151,32 +138,25 @@ def recomendar_tiendas(user_id, limit=15, k=10):
     if tiendas_base.empty:
         return []
 
-    # Features de tiendas
     cols_tiendas = ['nombre', 'barrio', 'municipio_venta']
     df_tiendas['features'] = df_tiendas[cols_tiendas].fillna("").astype(str).agg(' '.join, axis=1)
 
     vectorizer = TfidfVectorizer()
     tfidf_matrix = vectorizer.fit_transform(df_tiendas['features'])
 
-    # Índices base
     idxs_base = df_tiendas[df_tiendas['id'].isin(tiendas_base['id'])].index
     selected_vectors = tfidf_matrix[idxs_base]
 
-    # Modelo KNN
     knn = NearestNeighbors(metric='cosine', algorithm='brute', n_neighbors=min(k, len(df_tiendas)))
     knn.fit(tfidf_matrix)
 
     distances, indices = knn.kneighbors(selected_vectors, n_neighbors=limit)
     indices_flat = np.unique(indices.flatten())
 
-    # Calcular similitud promedio
     mean_distances = []
     for idx in indices_flat:
         dists = distances[:, np.where(indices == idx)[1]]
-        if len(dists.flatten()) > 0:
-            mean_distances.append(1 - np.mean(dists))
-        else:
-            mean_distances.append(0)
+        mean_distances.append(1 - np.mean(dists) if len(dists.flatten()) > 0 else 0)
 
     recomendadas = df_tiendas.iloc[indices_flat].copy()
     recomendadas['similitud'] = mean_distances
@@ -184,4 +164,5 @@ def recomendar_tiendas(user_id, limit=15, k=10):
     recomendadas = recomendadas[~recomendadas['id'].isin(tiendas_base['id'])]
     recomendadas = recomendadas.sort_values(by='similitud', ascending=False).head(limit)
 
-    return recomendadas[['id']].to_dict(orient="records")
+    # 🔹 Devolver toda la información de las tiendas
+    return recomendadas.to_dict(orient="records")
