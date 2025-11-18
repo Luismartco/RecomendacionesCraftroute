@@ -3,6 +3,7 @@ from recommender import recomendar_productos, recomendar_tiendas, obtener_prefer
 
 app = Flask(__name__)
 
+# Definir Endpoint de recomendacion de productos
 @app.route("/recomendar_productos", methods=["GET"])
 def api_recomendar_productos():
     user_id = request.args.get("user_id", type=int)
@@ -12,6 +13,7 @@ def api_recomendar_productos():
     productos = recomendar_productos(user_id=user_id, limit=30)
     return jsonify(productos)
 
+# Definir Endpoint de recomendacion de tiendas
 @app.route("/recomendar_tiendas", methods=["GET"])
 def api_recomendar_tiendas():
     user_id = request.args.get("user_id", type=int)
@@ -21,6 +23,7 @@ def api_recomendar_tiendas():
     tiendas = recomendar_tiendas(user_id=user_id, limit=15)
     return jsonify(tiendas)
 
+# Definir Endpoint de visualizacion de los datos del usuario para la recomendacion
 @app.route("/ver_datos_usuario", methods=["GET"])
 def ver_datos_usuario():
     user_id = request.args.get("user_id", type=int)
@@ -79,3 +82,4 @@ def ver_datos_usuario():
 
 if __name__ == "__main__":
     app.run(debug=True, port=5055)
+
